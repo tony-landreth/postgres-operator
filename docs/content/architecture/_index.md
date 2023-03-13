@@ -1,4 +1,4 @@
----
+--
 title: "Architecture"
 date:
 draft: false
