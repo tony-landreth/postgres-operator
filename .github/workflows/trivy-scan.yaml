@@ -6,9 +6,11 @@ on:
   pull_request:
     branches:
       - master
+      - REL_4_7
   push:
     branches:
       - master
+      - REL_4_7
   # Scan schedule is same as codeql-analysis job.
   schedule:
     - cron: '10 18 * * 2'
