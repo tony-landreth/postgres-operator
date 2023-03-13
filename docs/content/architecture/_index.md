@@ -2,5 +2,5 @@
 title: "Architecture"
 date:
 draft: false
-weight: 25
+weight: 27
 ---
