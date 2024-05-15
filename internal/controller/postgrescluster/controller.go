@@ -42,6 +42,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
+	"github.com/crunchydata/postgres-operator/internal/autogrow"
 	"github.com/crunchydata/postgres-operator/internal/config"
 	"github.com/crunchydata/postgres-operator/internal/controller/runtime"
 	"github.com/crunchydata/postgres-operator/internal/logging"
@@ -62,6 +63,7 @@ const (
 
 // Reconciler holds resources for the PostgresCluster reconciler
 type Reconciler struct {
+	Autogrow    autogrow.Autogrow
 	Client      client.Client
 	IsOpenShift bool
 	Owner       client.FieldOwner
@@ -210,6 +212,11 @@ func (r *Reconciler) Reconcile(
 		}
 		return result, err
 	}
+
+	// TODO: Add only qualified clusters to WatchCluster.
+	r.Autogrow.WatchCluster(cluster.Namespace, cluster.Name, r.Client)
+	diskUse, _ := autogrow.GetDiskUsage(cluster, r.Client, r.PodExec)
+	autogrow.DiskUseStatus(cluster, &cluster.Status.Conditions, diskUse)
 
 	if r.Registration != nil && r.Registration.Required(r.Recorder, cluster, &cluster.Status.Conditions) {
 		registration.SetAdvanceWarning(r.Recorder, cluster, &cluster.Status.Conditions)

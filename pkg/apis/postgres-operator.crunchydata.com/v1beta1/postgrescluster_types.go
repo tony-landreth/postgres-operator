@@ -249,7 +249,6 @@ type DatabaseInitSQL struct {
 // PostgresClusterDataSource defines a data source for bootstrapping PostgreSQL clusters using a
 // an existing PostgresCluster.
 type PostgresClusterDataSource struct {
-
 	// The name of an existing PostgresCluster to use as the data source for the new PostgresCluster.
 	// Defaults to the name of the PostgresCluster being created if not provided.
 	// +optional
@@ -320,7 +319,6 @@ func (s *PostgresClusterSpec) Default() {
 
 // Backups defines a PostgreSQL archive configuration
 type Backups struct {
-
 	// pgBackRest archive configuration
 	// +kubebuilder:validation:Required
 	PGBackRest PGBackRestArchive `json:"pgbackrest"`
@@ -328,7 +326,6 @@ type Backups struct {
 
 // PostgresClusterStatus defines the observed state of PostgresCluster
 type PostgresClusterStatus struct {
-
 	// Identifies the databases that have been installed into PostgreSQL.
 	DatabaseRevision string `json:"databaseRevision,omitempty"`
 
@@ -405,6 +402,7 @@ const (
 	PostgresClusterProgressing = "Progressing"
 	ProxyAvailable             = "ProxyAvailable"
 	Registered                 = "Registered"
+	DiskStarved                = "DiskStarved"
 )
 
 type PostgresInstanceSetSpec struct {
@@ -558,7 +556,6 @@ type PostgresInstanceSetStatus struct {
 
 // PostgresProxySpec is a union of the supported PostgreSQL proxies.
 type PostgresProxySpec struct {
-
 	// Defines a PgBouncer proxy and connection pooler.
 	PGBouncer *PGBouncerPodSpec `json:"pgBouncer"`
 }
@@ -604,7 +601,6 @@ type PostgresStandbySpec struct {
 
 // UserInterfaceSpec is a union of the supported PostgreSQL user interfaces.
 type UserInterfaceSpec struct {
-
 	// Defines a pgAdmin user interface.
 	PGAdmin *PGAdminPodSpec `json:"pgAdmin"`
 }
@@ -619,7 +615,6 @@ func (s *UserInterfaceSpec) Default() {
 // PostgresUserInterfaceStatus is a union of the supported PostgreSQL user
 // interface statuses.
 type PostgresUserInterfaceStatus struct {
-
 	// The state of the pgAdmin user interface.
 	PGAdmin PGAdminPodStatus `json:"pgAdmin,omitempty"`
 }
