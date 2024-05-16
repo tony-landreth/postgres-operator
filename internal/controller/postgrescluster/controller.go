@@ -44,6 +44,7 @@ import (
 
 	"github.com/crunchydata/postgres-operator/internal/config"
 	"github.com/crunchydata/postgres-operator/internal/controller/runtime"
+	"github.com/crunchydata/postgres-operator/internal/diskstats"
 	"github.com/crunchydata/postgres-operator/internal/logging"
 	"github.com/crunchydata/postgres-operator/internal/pgaudit"
 	"github.com/crunchydata/postgres-operator/internal/pgbackrest"
@@ -210,6 +211,9 @@ func (r *Reconciler) Reconcile(
 		}
 		return result, err
 	}
+
+	diskUse, _ := diskstats.GetDiskUsage(cluster, r.Client, r.PodExec)
+	diskstats.DiskUseStatus(cluster, &cluster.Status.Conditions, diskUse)
 
 	if r.Registration != nil && r.Registration.Required(r.Recorder, cluster, &cluster.Status.Conditions) {
 		registration.SetAdvanceWarning(r.Recorder, cluster, &cluster.Status.Conditions)
