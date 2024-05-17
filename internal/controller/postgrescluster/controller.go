@@ -213,10 +213,10 @@ func (r *Reconciler) Reconcile(
 		return result, err
 	}
 
-	// TODO: Add only qualified clusters to WatchCluster.
-	r.Autogrow.WatchCluster(cluster.Namespace, cluster.Name, r.Client)
-	diskUse, _ := autogrow.GetDiskUsage(cluster, r.Client, r.PodExec)
-	autogrow.DiskUseStatus(cluster, &cluster.Status.Conditions, diskUse)
+	if autogrow.Enabled(*cluster) {
+		r.Autogrow.WatchCluster(cluster.Namespace, cluster.Name, r.Client)
+		autogrow.DiskUseStatusFromPVCAnnotation(r.Client, *cluster)
+	}
 
 	if r.Registration != nil && r.Registration.Required(r.Recorder, cluster, &cluster.Status.Conditions) {
 		registration.SetAdvanceWarning(r.Recorder, cluster, &cluster.Status.Conditions)

@@ -20,5 +20,5 @@ import (
 
 type Autogrow interface {
 	WatchCluster(clusterNamespace, clusterName string, client client.Client)
-	checkUsage() error
+	checkVolumes() error
 }
