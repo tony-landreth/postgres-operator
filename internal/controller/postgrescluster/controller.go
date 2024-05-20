@@ -215,7 +215,6 @@ func (r *Reconciler) Reconcile(
 
 	if autogrow.Enabled(*cluster) {
 		r.Autogrow.WatchCluster(cluster.Namespace, cluster.Name, r.Client)
-		autogrow.DiskUseStatusFromPVCAnnotation(r.Client, *cluster)
 	}
 
 	if r.Registration != nil && r.Registration.Required(r.Recorder, cluster, &cluster.Status.Conditions) {

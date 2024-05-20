@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,8 +32,6 @@ import (
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -40,7 +39,10 @@ import (
 
 // There are 6 df output columns for df --human-readable: "Filesystem Size Used Avail Use% Mounted on".
 // 4 of those columns are relevant.
-const dfUsePercentIdx int = 4
+const (
+	dfUsePercentIdx int = 4
+	dfSizeIdx       int = 1
+)
 
 type Runner struct {
 	client       client.Client
@@ -132,17 +134,19 @@ func (r *Runner) checkVolumes() error {
 	for i := 0; i < sliceLength; i++ {
 		go func(i int) error {
 			defer wg.Done()
-			usage, err := r.checkVolume(keys, i, err)
+			primary, usage, size, err := r.checkVolume(keys, i, err)
 			key := keys[i]
-			clusters := r.clusters[key]
-			clusterNamespace := clusters[0]
-			clusterName := clusters[1]
+			clusterData := r.clusters[key]
+			if len(clusterData) != 2 {
+				return err
+			}
+			clusterNamespace := clusterData[0]
+			clusterName := clusterData[1]
 
-			r.log.Info(fmt.Sprintf("%s disk usage %s", keys[i], usage))
+			r.log.Info(fmt.Sprintf("%s disk usage %s disk size %s", keys[i], usage, size))
 			if ExceedsUsageLimit(usage) {
-				// TODO: Log appropriately.
 				r.log.Error(errors.New("DiskUsageAboveThreshold"), fmt.Sprintf("%s disk usage %s", keys[i], usage))
-				r.annotatePGDataPVC(clusterNamespace, clusterName, r.client)
+				r.annotatePGPrimaryPod(primary, clusterNamespace, clusterName, r.client, size)
 			}
 			if err != nil {
 				return err
@@ -153,7 +157,19 @@ func (r *Runner) checkVolumes() error {
 	return err
 }
 
-func (r *Runner) checkVolume(keys []string, i int, err error) (string, error) {
+// TODO: Add error handling.
+func (r *Runner) getPGPrimaryPod(podList corev1.PodList) (corev1.Pod, error) {
+	var primary v1.Pod
+	for _, pod := range podList.Items {
+		if pod.Labels[naming.LabelRole] == naming.RolePatroniLeader {
+			primary = pod
+		}
+	}
+	return primary, nil
+}
+
+// checkVolume will exec into the primary and run df, returning Use% and Size
+func (r *Runner) checkVolume(keys []string, i int, err error) (corev1.Pod, string, string, error) {
 	clusters := r.clusters
 	k := keys[i]
 	cluster := clusters[k]
@@ -167,31 +183,27 @@ func (r *Runner) checkVolume(keys []string, i int, err error) (string, error) {
 			client.InNamespace(clusterNamespace),
 			client.MatchingLabelsSelector{Selector: selector},
 		))
+	var primary v1.Pod
 	if len(pods.Items) == 0 {
 		// If no pods return, it may indicate that the cluster has been deleted.
 		// Queue the key for removal up the stack.
 		r.stale = append(r.stale, k)
-		return "", nil
+		return primary, "", "", nil
 	}
-	var primary v1.Pod
-	for _, pod := range pods.Items {
-		if pod.Labels[naming.LabelRole] == naming.RolePatroniLeader {
-			primary = pod
-		}
-	}
+	primary, err = r.getPGPrimaryPod(*pods)
 	podName := fmt.Sprintf(primary.ObjectMeta.Name)
 	var stdin, stdout, stderr bytes.Buffer
 
 	dfString := []string{"df", "--human-readable", "/pgdata"}
 	r.podExec("postgres-operator", podName, "database", &stdout, &stdin, &stderr, dfString...)
 
-	if stdin.String() != "" {
+	if stdin.String() != "" && strings.Contains(stdin.String(), "%") {
 		dfValues := strings.Split(stdin.String(), "\n")[1]
-		if percent := strings.Fields(dfValues)[dfUsePercentIdx]; strings.Contains(percent, "%") {
-			return percent, nil
-		}
+		percentUse := strings.Fields(dfValues)[dfUsePercentIdx]
+		size := strings.Fields(dfValues)[dfSizeIdx]
+		return primary, percentUse, size, nil
 	}
-	return "", err
+	return primary, "", "", err
 }
 
 func GetPGDataPVC(clusterNamespace, clusterName string, cli client.Client) (corev1.PersistentVolumeClaim, error) {
@@ -205,18 +217,28 @@ func GetPGDataPVC(clusterNamespace, clusterName string, cli client.Client) (core
 			))
 	}
 
+	if len(volumes.Items) == 0 {
+		return corev1.PersistentVolumeClaim{}, err
+	}
 	// TODO: Check that there isn't a more expressive way of getting the right item.
 	return volumes.Items[0], err
 }
 
-func (r *Runner) annotatePGDataPVC(clusterNamespace, clusterName string, cli client.Client) error {
-	pvc, err := GetPGDataPVC(clusterNamespace, clusterName, cli)
-	if err != nil {
-		return err
-	}
-	err = r.client.Patch(context.TODO(), &pvc, client.RawPatch(
-		client.Merge.Type(), []byte(`{"metadata":{"annotations":{"disk-starvation": "detected"}}}`)))
-	return nil
+func (r *Runner) annotatePGPrimaryPod(primary corev1.Pod, clusterNamespace, clusterName string, cli client.Client, size string) error {
+	reg, err := regexp.Compile(`[aA-zZ]*$`)
+	unitStr := reg.FindString(size)
+	num := strings.Split(size, unitStr)[0]
+	sizeFloat, err := strconv.ParseFloat(num, 64)
+
+	newSizeFloat := sizeFloat * 1.5
+	newSizeInt := int(newSizeFloat)
+	newSizeStr := fmt.Sprintf("%d%s", newSizeInt, unitStr)
+	anno := []byte(`{"metadata":{"annotations":{"disk-starvation": "%s"}}}`)
+	// TODO: multiply size by 1.5
+	sizeAnno := fmt.Sprintf(string(anno), newSizeStr)
+	err = r.client.Patch(context.TODO(), &primary, client.RawPatch(
+		client.Merge.Type(), []byte(sizeAnno)))
+	return err
 }
 
 // NeedLeaderElection returns true so that r runs only on the single
@@ -228,43 +250,6 @@ type exec func(
 	stdin io.Reader, stdout, stderr io.Writer, command ...string,
 ) error
 
-// TODO: Delete GetDiskUsage.
-func GetDiskUsage(cluster *v1beta1.PostgresCluster, cli client.Client, podExec exec) (string, error) {
-	clusterNamespace := cluster.Namespace
-	clusterName := cluster.Name
-	pods := &corev1.PodList{}
-	selector, _ := naming.AsSelector(naming.ClusterInstances(clusterName))
-	ctx := context.Background()
-	err := errors.WithStack(
-		cli.List(ctx, pods,
-			client.InNamespace(clusterNamespace),
-			client.MatchingLabelsSelector{Selector: selector},
-		))
-
-	if len(pods.Items) == 0 {
-		return "", errors.New("No pods found")
-	}
-
-	var primary v1.Pod
-	for _, pod := range pods.Items {
-		if pod.Labels[naming.LabelRole] == naming.RolePatroniLeader {
-			primary = pod
-		}
-	}
-	podName := fmt.Sprintf(primary.ObjectMeta.Name)
-	var stdin, stdout, stderr bytes.Buffer
-	dfString := []string{"df", "--human-readable", "/pgdata"}
-	podExec("postgres-operator", podName, "database", &stdout, &stdin, &stderr, dfString...)
-
-	if stdin.String() != "" {
-		dfValues := strings.Split(stdin.String(), "\n")[1]
-		if percent := strings.Fields(dfValues)[dfUsePercentIdx]; strings.Contains(percent, "%") {
-			return percent, nil
-		}
-	}
-	return "", err
-}
-
 func Enabled(cluster v1beta1.PostgresCluster) bool {
 	// TODO: Make this real.
 	return true
@@ -274,45 +259,4 @@ func ExceedsUsageLimit(diskUse string) bool {
 	percentString := strings.Split(diskUse, "%")[0]
 	percentInt, _ := strconv.Atoi(percentString)
 	return percentInt > 75
-}
-
-// TODO: Move onto this function.
-func DiskUseStatusFromPVCAnnotation(cli client.Client, cluster v1beta1.PostgresCluster) error {
-	pvc, err := GetPGDataPVC(cluster.Namespace, cluster.Name, cli)
-	conditions := &cluster.Status.Conditions
-	if pvc.Annotations["disk-starvation"] == "detected" {
-		updateStatus(&cluster, conditions)
-	}
-
-	return err
-}
-
-func updateStatus(object client.Object, conditions *[]metav1.Condition) {
-	meta.SetStatusCondition(conditions, metav1.Condition{
-		Type:               v1beta1.DiskStarved,
-		Status:             metav1.ConditionTrue,
-		Reason:             "DiskUsageAboveThreshold",
-		Message:            "Disk use exceeds 75%",
-		ObservedGeneration: object.GetGeneration(),
-	})
-}
-
-func DiskUseStatus(object client.Object, conditions *[]metav1.Condition, diskUse string) {
-	if ExceedsUsageLimit(diskUse) {
-		meta.SetStatusCondition(conditions, metav1.Condition{
-			Type:               v1beta1.DiskStarved,
-			Status:             metav1.ConditionTrue,
-			Reason:             "DiskUsageAboveThreshold",
-			Message:            fmt.Sprintf("Disk use is at %s", diskUse),
-			ObservedGeneration: object.GetGeneration(),
-		})
-		return
-	}
-	meta.SetStatusCondition(conditions, metav1.Condition{
-		Type:               v1beta1.DiskStarved,
-		Status:             metav1.ConditionFalse,
-		Reason:             "DiskUsageBelowThreshold",
-		Message:            fmt.Sprintf("Disk use is at %s", diskUse),
-		ObservedGeneration: object.GetGeneration(),
-	})
 }
