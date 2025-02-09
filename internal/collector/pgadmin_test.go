@@ -70,9 +70,13 @@ collector.yaml: |
       log_statements:
       - context: log
         statements:
+        - set(instrumentation_scope.name, "pgadmin")
+        - set(attributes["log.record.original"], body)
         - set(cache, ParseJSON(body))
         - merge_maps(attributes, ExtractPatterns(cache["message"], "(?P<webrequest>[A-Z]{3}.*?[\\d]{3})"),
           "insert")
+        - set(body, cache["message"])
+        - set(attributes["process.title"], cache["name"])
         - set(severity_text, cache["level"])
         - set(time_unix_nano, Int(cache["time"]*1000000000))
         - set(severity_number, SEVERITY_NUMBER_DEBUG)  where severity_text == "DEBUG"
@@ -174,9 +178,13 @@ collector.yaml: |
       log_statements:
       - context: log
         statements:
+        - set(instrumentation_scope.name, "pgadmin")
+        - set(attributes["log.record.original"], body)
         - set(cache, ParseJSON(body))
         - merge_maps(attributes, ExtractPatterns(cache["message"], "(?P<webrequest>[A-Z]{3}.*?[\\d]{3})"),
           "insert")
+        - set(body, cache["message"])
+        - set(attributes["process.title"], cache["name"])
         - set(severity_text, cache["level"])
         - set(time_unix_nano, Int(cache["time"]*1000000000))
         - set(severity_number, SEVERITY_NUMBER_DEBUG)  where severity_text == "DEBUG"

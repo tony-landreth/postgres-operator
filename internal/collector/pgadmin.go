@@ -60,10 +60,32 @@ func EnablePgAdminLogging(ctx context.Context, instrumentationSpec *v1beta1.Inst
 			{
 				"context": "log",
 				"statements": []string{
+					// Set instrumentation scope
+					`set(instrumentation_scope.name, "pgadmin")`,
+
+					// Keep the unparsed log record in a standard attribute, and replace
+					// the log record body with the message field.
+					//
+					// https://github.com/open-telemetry/semantic-conventions/blob/v1.29.0/docs/general/logs.md
+					`set(attributes["log.record.original"], body)`,
 					`set(cache, ParseJSON(body))`,
 					`merge_maps(attributes, ExtractPatterns(cache["message"], "(?P<webrequest>[A-Z]{3}.*?[\\d]{3})"), "insert")`,
+					`set(body, cache["message"])`,
+
+					// Set process.title to the "name" from each log record.
+					// TODO: confirm that the "name" entry in the pgAdmin logs is in fact referring
+					// to a process... Should this be "instrumentation_scope.name"??
+					`set(attributes["process.title"], cache["name"])`,
+
+					// https://opentelemetry.io/docs/specs/otel/logs/data-model/#field-severitytext
 					`set(severity_text, cache["level"])`,
 					`set(time_unix_nano, Int(cache["time"]*1000000000))`,
+
+					// Map pgAdmin "logging levels" to OpenTelemetry severity levels.
+					//
+					// https://opentelemetry.io/docs/specs/otel/logs/data-model/#field-severitynumber
+					// https://opentelemetry.io/docs/specs/otel/logs/data-model-appendix/#appendix-b-severitynumber-example-mappings
+					// https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/-/pkg/ottl/contexts/ottllog#enums
 					`set(severity_number, SEVERITY_NUMBER_DEBUG)  where severity_text == "DEBUG"`,
 					`set(severity_number, SEVERITY_NUMBER_INFO)   where severity_text == "INFO"`,
 					`set(severity_number, SEVERITY_NUMBER_WARN)   where severity_text == "WARNING"`,
