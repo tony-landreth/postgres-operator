@@ -12,6 +12,7 @@ import (
 	"github.com/crunchydata/postgres-operator/internal/feature"
 	"github.com/crunchydata/postgres-operator/internal/initialize"
 	"github.com/crunchydata/postgres-operator/internal/naming"
+	"github.com/crunchydata/postgres-operator/pkg/apis/postgres-operator.crunchydata.com/v1beta1"
 )
 
 // AddToConfigMap populates the shared ConfigMap with fields needed to run the Collector.
@@ -33,6 +34,7 @@ func AddToConfigMap(
 // AddToPod adds the OpenTelemetry collector container to a given Pod
 func AddToPod(
 	ctx context.Context,
+	instrumentationSpec *v1beta1.InstrumentationSpec,
 	pullPolicy corev1.PullPolicy,
 	inInstanceConfigMap *corev1.ConfigMap,
 	outPod *corev1.PodSpec,
@@ -61,6 +63,12 @@ func AddToPod(
 				}},
 			},
 		}},
+	}
+
+	// If the user has specified files to be mounted in the spec, add them to the projected config volume
+	if instrumentationSpec != nil && instrumentationSpec.Config != nil &&
+		instrumentationSpec.Config.Files != nil {
+		configVolume.Projected.Sources = append(configVolume.Projected.Sources, instrumentationSpec.Config.Files...)
 	}
 
 	container := corev1.Container{
