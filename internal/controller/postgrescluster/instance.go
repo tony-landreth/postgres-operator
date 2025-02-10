@@ -1202,8 +1202,16 @@ func (r *Reconciler) reconcileInstance(
 
 	if err == nil &&
 		(feature.Enabled(ctx, feature.OpenTelemetryLogs) || feature.Enabled(ctx, feature.OpenTelemetryMetrics)) {
+
+		existing := &corev1.Secret{ObjectMeta: naming.MonitoringUserSecret(cluster)}
+		err := errors.WithStack(
+			r.Client.Get(ctx, client.ObjectKeyFromObject(existing), existing))
+		if client.IgnoreNotFound(err) != nil {
+			return err
+		}
+
 		collector.AddToPod(ctx, cluster.Spec.Instrumentation, cluster.Spec.ImagePullPolicy, instanceConfigMap, &instance.Spec.Template.Spec,
-			[]corev1.VolumeMount{postgres.DataVolumeMount()}, "")
+			[]corev1.VolumeMount{postgres.DataVolumeMount()}, string(existing.Data["password"]))
 	}
 
 	// Add pgMonitor resources to the instance Pod spec

@@ -23,9 +23,10 @@ func NewConfigForPostgresPod(ctx context.Context,
 ) *Config {
 	config := NewConfig(inCluster.Spec.Instrumentation)
 
-	EnablePatroniLogging(ctx, inCluster, config)
-	EnablePatroniMetrics(ctx, inCluster, config)
-	EnablePostgresLogging(ctx, inCluster, config, outParameters)
+	EnablePostgresMetrics(ctx, inCluster, config)
+	// EnablePatroniLogging(ctx, inCluster, config)
+	// EnablePatroniMetrics(ctx, inCluster, config)
+	// EnablePostgresLogging(ctx, inCluster, config, outParameters)
 
 	return config
 }
